@@ -1,4 +1,4 @@
-module invoker
+module AzureAgent 
 
 go 1.21.4
 
