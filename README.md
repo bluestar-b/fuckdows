@@ -1,7 +1,8 @@
 A simple backdoor using Golang as a REST API (for educational purposes):
 
-- **/powershell?command=<command>:** Run any PowerShell command.
+- **/run?command=<command>:** Run any shell command. (Windows: PowerShell, Linux: )
 - **/screenshot:** Return a desktop screenshot.
+- **/stream:** Almost realtime screenshot stream
 - **/system:** Provide machine status (RAM, CPU, etc.).
 - **/procs:** Display a list of processes.
 - **/(index):** Serve files.

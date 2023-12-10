@@ -3,9 +3,11 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"image/png"
 	"net/http"
 	"os/exec"
+	"runtime"
 	"strconv"
 
 	"github.com/shirou/gopsutil/cpu"
@@ -14,7 +16,20 @@ import (
 	"github.com/vova616/screenshot"
 )
 
-func handlePowerShellCommand(w http.ResponseWriter, r *http.Request) {
+func handleFileServe(w http.ResponseWriter, r *http.Request) {
+	var dir string
+
+	switch runtime.GOOS {
+	case "windows":
+		dir = "C:/"
+	default:
+		dir = "/"
+	}
+
+	http.FileServer(http.Dir(dir)).ServeHTTP(w, r)
+}
+
+func handleShellCommand(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -26,9 +41,9 @@ func handlePowerShellCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	output, err := runPowerShellCommand(command)
+	output, err := runShellCommand(command)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error executing PowerShell command: %s", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Error executing command: %s", err), http.StatusInternalServerError)
 		return
 	}
 
@@ -36,12 +51,20 @@ func handlePowerShellCommand(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(output))
 }
 
-func runPowerShellCommand(command string) (string, error) {
-	cmd := exec.Command("powershell.exe", "-Command", command)
+func runShellCommand(command string) (string, error) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.Command("powershell.exe", "-Command", command)
+	case "linux":
+		cmd = exec.Command("sh", "-c", command)
+	default:
+		return "", fmt.Errorf("unsupported operating system: %s", runtime.GOOS)
+	}
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("failed to execute PowerShell command: %w", err)
+		return "", fmt.Errorf("failed to execute command: %w", err)
 	}
 
 	return string(output), nil
@@ -129,11 +152,6 @@ func handleProcesses(w http.ResponseWriter, r *http.Request) {
 	writeJSONResponse(w, processRows)
 }
 
-func handleFileServe(w http.ResponseWriter, r *http.Request) {
-	dir := "C:/"
-	http.FileServer(http.Dir(dir)).ServeHTTP(w, r)
-}
-
 func writeJSONResponse(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	err := json.NewEncoder(w).Encode(data)
@@ -142,11 +160,50 @@ func writeJSONResponse(w http.ResponseWriter, data interface{}) {
 	}
 }
 
+func handleHtmlStream(w http.ResponseWriter, r *http.Request) {
+	htmlContent := `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Auto-Refresh Image</title>
+</head>
+<body>
+
+<img id="screenshot" src="" alt="Screenshot">
+
+<script>
+var currentHost = window.location.hostname;
+    function refreshImage() {
+        var image = document.getElementById('screenshot');
+        image.src = 'http://'+ currentHost + ':4328/screenshot?'+ new Date().getTime();
+    }
+
+    setInterval(refreshImage, 500);
+</script>
+
+</body>
+</html>`
+	tmpl, err := template.New("html").Parse(htmlContent)
+	if err != nil {
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	err = tmpl.Execute(w, nil)
+	if err != nil {
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+}
+
 func main() {
-	http.HandleFunc("/powershell", handlePowerShellCommand)
+	http.HandleFunc("/run", handleShellCommand)
 	http.HandleFunc("/screenshot", handleScreenshot)
 	http.HandleFunc("/system", handleSystemInfo)
 	http.HandleFunc("/procs", handleProcesses)
+	http.HandleFunc("/stream", handleHtmlStream)
+
 	http.HandleFunc("/", handleFileServe)
 
 	port := 4328
